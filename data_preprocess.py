@@ -1,4 +1,3 @@
-
 import torch
 import numpy as np
 from tqdm.notebook import tqdm
@@ -7,7 +6,6 @@ import scipy.io
 import gc
 from load_data import MyData  # self-made
 import pandas as pd
-
 
 def data_cut(dataset, chunk_length, device):
     """
@@ -89,7 +87,7 @@ def generate_eegmap(dataset, matrix_index, exper_dir, condi_dir, device):
             data_map_para = []
             for point in range(data.shape[1]):  # 遍历该段所有数据点
                 # 创建单个数据点全0map
-                data_map_point = torch.zeros((10, 11), device=device)
+                data_map_point = torch.zeros((9, 11), device=device)
                 # 遍历59电极数据并赋值给全0map
                 for channel in range(data.shape[0]):
                     data_map_point[matrix_index[0][channel]][matrix_index[1][channel]] = data[channel][point][para]
@@ -103,7 +101,7 @@ def generate_eegmap(dataset, matrix_index, exper_dir, condi_dir, device):
             gc.collect()
             torch.cuda.empty_cache()
         # 保存 被试map 到文件中
-        save_path = f"../data/eegmap_direct/{exper_dir}/{condi_dir}/{dataset.file_path[person]}.pt"
+        save_path = f"../data/eegmap_direct_new/{exper_dir}/{condi_dir}/{dataset.file_path[person]}.pt"
         torch.save(torch.stack(data_map_person), save_path)
 
 
@@ -160,7 +158,7 @@ def generate_eegstrip(dataset, matrix_index, exper_dir, condi_dir, device):
             gc.collect()
             torch.cuda.empty_cache()
         # 保存 被试map 到文件中
-        save_path = f"../data/eegmap_direct/rest59/{condi_dir}/{dataset.file_path[person]}.pt"
+        save_path = f"../data/eegmap_direct_new/rest/{condi_dir}/{dataset.file_path[person]}.pt"
         torch.save(torch.stack(data_map_person), save_path)
 
 
@@ -176,7 +174,7 @@ def generate_eegmap_chunks(root_dir, exper_dir, condi_dir):
         for i in range(data_map.size(0)):  # 每个被试切割成2400大小的块保存到data_all中
             data_all.append(data_map[i])
 
-    savepath = f"../data/eegmap_chunks/{exper_dir}/{condi_dir}/{exper_dir}_{condi_dir}.pt"
+    savepath = f"../data/eegmap_chunks_new/{exper_dir}/{condi_dir}/{exper_dir}_{condi_dir}.pt"
     # print(data_all.shape)
     torch.save(torch.stack(data_all), savepath)
     print(len(data_all))

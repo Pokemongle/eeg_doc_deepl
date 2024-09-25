@@ -3,7 +3,8 @@ import torch
 import numpy as np
 import torch.nn.init as init
 from torch.utils.data import DataLoader
-
+import torch.nn.functional as F
+import matplotlib.pyplot as plt
 
 # cnn时间卷积+空间卷积+lstm
 # 定义一个LSTM模型
@@ -71,13 +72,23 @@ class MyNetwork(nn.Module):
         self.lstm = nn.LSTM(input_size, hidden_size, num_layers, batch_first=True, dropout=0.2)
         self.fc = nn.Linear(hidden_size, output_size)
         # self.softmax = nn.Softmax(dim=1)
+        self.gradients = None
+        self.feature_maps = None
+
+    def save_gradient(self, grad):
+        self.gradients = grad
 
     def forward(self, x):
         # 前向传播过程
         x = self.conv1(x)
         # print(x.size())
         x = torch.reshape(x, (800, 16, 10, 11))
+        # print(x.size())
+        self.feature_maps = x
+        # self.feature_maps.requires_grad = True  # 确保需要计算梯度
+        x.register_hook(self.save_gradient)
         x = self.convspa(x)
+
         x = torch.reshape(x, (1, 64, 1, 800))
         x = self.conv2(x)
         x = self.conv3(x)
@@ -99,46 +110,105 @@ class MyNetwork(nn.Module):
         return out
 
 
+def grad_cam(model, input_data, target_class):
+    # 前向传播，得到输出和特征图
+    output = model(input_data)
+    target_score = output[0, target_class]
+
+    # 清零梯度，并进行反向传播，获取梯度
+    model.zero_grad()
+    target_score.backward()
+
+    # 获取模型中的梯度和特征图
+    gradients = model.gradients  # 梯度，形状: [B, C, H, W]
+    feature_maps = model.feature_maps  # 特征图，形状: [B, C, H, W]
+
+    # 对梯度进行全局平均池化
+    pooled_gradients = torch.mean(gradients, dim=[0, 2, 3])
+
+    # 按通道重要性对特征图加权
+    for i in range(feature_maps.size(1)):
+        feature_maps[:, i, :, :] *= pooled_gradients[i]
+
+    # 计算Grad-CAM，按通道求平均值
+    heatmap = torch.mean(feature_maps, dim=1).squeeze()
+    heatmap = torch.mean(heatmap, dim=0).squeeze()
+
+    # 使用ReLU激活，去除负值
+    heatmap = F.relu(heatmap)
+
+    # 归一化热力图
+    heatmap /= torch.max(heatmap)
+
+    # 调整热力图大小为10x11 EEG电极分布
+    heatmap_resized = heatmap.cpu().detach().numpy()
+    print(heatmap_resized.shape)  # 打印检查
+    # heatmap_resized = np.mean(heatmap_resized.reshape(800, 10, 11), axis=0)
+
+    return heatmap_resized
+
+
 def main():
-    # 原始输入矩阵
-    input_matrix = torch.randn(10, 11, 1, 1, 2400)
+    mode = 1
+    if mode == 0:
+        # 原始输入矩阵
+        input_matrix = torch.randn(10, 11, 1, 1, 2400)
 
-    # 重塑为 (110, 1, 1, 2400)
-    reshaped_input = torch.reshape(input_matrix, (110, 1, 1, 2400))
+        # 重塑为 (110, 1, 1, 2400)
+        reshaped_input = torch.reshape(input_matrix, (110, 1, 1, 2400))
 
-    # 定义LSTM超参数
-    input_size = 64  # 输入特征维度
-    hidden_size = 64  # 隐藏单元数量
-    num_layers = 2  # LSTM层数
-    output_size = 2  # 输出类别数量
+        # 定义LSTM超参数
+        input_size = 64  # 输入特征维度
+        hidden_size = 64  # 隐藏单元数量
+        num_layers = 2  # LSTM层数
+        output_size = 2  # 输出类别数量
 
-    # # 构建一个随机输入x和对应标签y
-    # x = torch.randn(2, 32, 10)  # [batch_size, sequence_length, input_size]
-    # print(x.size())
-    y = torch.randint(0, 2, (1,))  # 二分类任务，标签为0或1
-    # print(f"y_size:{y.size()}")
-    # print(y)
-    # 创建LSTM模型，并将输入x传入模型计算预测输出
-    net = MyNetwork(input_size, hidden_size, num_layers, output_size)
-    pred = net(reshaped_input)  # [batch_size, output_size]
+        # # 构建一个随机输入x和对应标签y
+        # x = torch.randn(2, 32, 10)  # [batch_size, sequence_length, input_size]
+        # print(x.size())
+        y = torch.randint(0, 2, (1,))  # 二分类任务，标签为0或1
+        # print(f"y_size:{y.size()}")
+        # print(y)
+        # 创建LSTM模型，并将输入x传入模型计算预测输出
+        net = MyNetwork(input_size, hidden_size, num_layers, output_size)
+        pred = net(reshaped_input)  # [batch_size, output_size]
 
-    # 定义损失函数和优化器，并进行模型训练
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
-    num_epochs = 100
+        # 定义损失函数和优化器，并进行模型训练
+        criterion = nn.CrossEntropyLoss()
+        optimizer = torch.optim.Adam(net.parameters(), lr=1e-3)
+        num_epochs = 100
 
-    for epoch in range(num_epochs):
-        # 前向传播计算损失函数值
-        pred = net(reshaped_input)  # 在每个epoch中重新计算预测输出
-        loss = criterion(pred, y.long())
+        for epoch in range(num_epochs):
+            # 前向传播计算损失函数值
+            pred = net(reshaped_input)  # 在每个epoch中重新计算预测输出
+            loss = criterion(pred, y.long())
 
-        # 反向传播更新模型参数
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()
+            # 反向传播更新模型参数
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
 
-        # 输出每个epoch的训练损失
-        print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}")
+            # 输出每个epoch的训练损失
+            print(f"Epoch [{epoch + 1}/{num_epochs}], Loss: {loss.item():.4f}")
+    else:
+        # 定义模型结构和超参数
+        input_size = 64  # 输入特征维度
+        hidden_size = 64  # 隐藏单元数量
+        num_layers = 2  # LSTM层数
+        output_size = 2  # 输出类别数量
+        device = torch.device("cuda:0")
+        input_data = torch.randn(110, 1, 1, 2400).to(device)
+        model = MyNetwork(input_size, hidden_size, num_layers, output_size).to(device)
+        model.train()
+        target_class = 1  # 需要可视化的类别
+
+        heatmap = grad_cam(model, input_data, target_class)
+
+        # 显示热力图
+        plt.imshow(heatmap, cmap='jet', alpha=0.6)
+        plt.colorbar()
+        plt.title('Grad-CAM EEG 脑电地形图')
+        plt.show()
 
 
 if __name__ == '__main__':
