@@ -84,9 +84,12 @@ class MyNetwork(nn.Module):
         # print(x.size())
         x = torch.reshape(x, (800, 16, 10, 11))
         # print(x.size())
-        self.feature_maps = x
-        # self.feature_maps.requires_grad = True  # 确保需要计算梯度
-        x.register_hook(self.save_gradient)
+
+        # --------- for Grad-CAM ----------
+        # self.feature_maps = x
+        # # self.feature_maps.requires_grad = True  # 确保需要计算梯度
+        # x.register_hook(self.save_gradient)
+        # ---------------------------------
         x = self.convspa(x)
 
         x = torch.reshape(x, (1, 64, 1, 800))
